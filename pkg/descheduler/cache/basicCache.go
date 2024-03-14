@@ -13,10 +13,11 @@ type NodeInfoShadow struct {
 }
 
 type NodeUsageMap struct {
-	Node         *v1.Node          `json:"-"`
-	UsageList    []v1.ResourceList `json:"usageList"`
-	AllPods      []*PodUsageMap    `json:"-"`
-	CurrentUsage v1.ResourceList
+	Node          *v1.Node          `json:"-"`
+	UsageList     []v1.ResourceList `json:"usageList"`
+	AllPods       []*PodUsageMap    `json:"-"`
+	NodeCiyChance int64
+	CurrentUsage  v1.ResourceList
 }
 type PodUsageMap struct {
 	Pod       *v1.Pod           `json:"-"`

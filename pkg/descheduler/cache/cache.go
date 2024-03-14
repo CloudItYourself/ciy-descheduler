@@ -3,10 +3,14 @@ package cache
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -21,26 +25,30 @@ import (
 )
 
 const (
-	LATEST_REAL_METRICS_STORE int = 6
-	LATEST_HIGH_METRICS_STORE int = 3
-	MAX_REAL_METRICS_STORE    int = 15
+	LATEST_REAL_METRICS_STORE       int           = 6
+	LATEST_HIGH_METRICS_STORE       int           = 3
+	MAX_REAL_METRICS_STORE          int           = 15
+	CIY_RESPONSE_TIMEOUT_IN_SECONDS time.Duration = 2 * time.Second
+	CIY_NODE_SCORE_API              string        = "%s/api/v1/node_score/%s"
 )
 
 type Cache struct {
 	sync.RWMutex
 
-	client     clientset.Interface
-	stopChan   <-chan struct{}
-	nodeLister corelisters.NodeLister
-	mc         metricsclientset.Interface
-	nodes      map[string]*nodeStats
+	client            clientset.Interface
+	stopChan          <-chan struct{}
+	nodeLister        corelisters.NodeLister
+	mc                metricsclientset.Interface
+	nodes             map[string]*nodeStats
+	kubeScheduelerURL string
 }
 
 type nodeStats struct {
-	node       *v1.Node
-	realUsed   []*v1beta1.NodeMetrics
-	updateTime time.Time
-	pods       map[string]*podStats
+	node          *v1.Node
+	realUsed      []*v1beta1.NodeMetrics
+	updateTime    time.Time
+	pods          map[string]*podStats
+	nodeCiyChance int64
 }
 
 func (ns *nodeStats) getPodUsageByNode() []*PodUsageMap {
@@ -97,12 +105,14 @@ func newPodStats(pod *v1.Pod) *podStats {
 
 func InitCache(client clientset.Interface, nodeInformer cache.SharedIndexInformer, nodeLister corelisters.NodeLister, podInformer cache.SharedIndexInformer, mc metricsclientset.Interface, stopChan <-chan struct{}) (BasicCache, error) {
 	iCache := &Cache{
-		client:     client,
-		nodeLister: nodeLister,
-		stopChan:   stopChan,
-		mc:         mc,
-		nodes:      make(map[string]*nodeStats, 500),
+		client:            client,
+		nodeLister:        nodeLister,
+		stopChan:          stopChan,
+		mc:                mc,
+		nodes:             make(map[string]*nodeStats, 500),
+		kubeScheduelerURL: os.Getenv("CIY_SCHEDULER_URL"),
 	}
+
 	_, err := nodeInformer.AddEventHandler(iCache.GetResourceNodeEventHandler())
 	if err != nil {
 		return iCache, err
@@ -121,6 +131,7 @@ func (c *Cache) Run(period time.Duration) {
 	}
 	go wait.Until(c.ClearStat, period, c.stopChan)
 	go wait.Until(c.syncMetricsWorker, period, c.stopChan)
+	go wait.Until(c.getCiyNodeScores, period, c.stopChan)
 }
 
 func (c *Cache) ClearStat() {
@@ -199,6 +210,52 @@ func (c *Cache) syncMetricsWorker() {
 				nodeStatus.pods[podMetricsItem.Name].realUsed = u
 			}
 		}
+	}
+}
+
+func runTimedHttpRequest(ctx context.Context, method string, url string) (string, error) {
+	context, cancel := context.WithTimeout(ctx, CIY_RESPONSE_TIMEOUT_IN_SECONDS)
+	defer cancel() // Ensure resources are cleaned up
+
+	req, err := http.NewRequestWithContext(context, method, url, nil)
+	if err != nil {
+		return "", err
+	}
+	client := &http.Client{}
+
+	// Send the request using the client
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("Error sending request:", err)
+		return "", err
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Error readingbody:", err)
+		return "", err
+	}
+	return string(respBody), nil
+}
+
+func (c *Cache) getCiyNodeScores() {
+	klog.V(4).Infof("sync metrics start")
+	defer func() {
+		klog.V(4).Infof("sync metrics end")
+	}()
+	c.Lock()
+	defer c.Unlock()
+
+	ctx := context.Background()
+	for nodeName, nodeStats := range c.nodes {
+		resp, err := runTimedHttpRequest(ctx, http.MethodGet, fmt.Sprintf(CIY_NODE_SCORE_API, c.kubeScheduelerURL, nodeName))
+		if err != nil {
+			klog.V(1).Infof("Failed to get metrics for node %s", nodeName)
+			nodeStats.nodeCiyChance = 0
+		} else {
+			nodeStats.nodeCiyChance, _ = strconv.ParseInt(resp, 10, 64)
+		}
+
 	}
 }
 
@@ -427,11 +484,14 @@ func (ns *nodeStats) getNodeUsageMap() *NodeUsageMap {
 	if len(usage) > 0 {
 		currentUsage = usage[len(usage)-1]
 	}
+
+	ciyScore := ns.nodeCiyChance
 	return &NodeUsageMap{
-		Node:         node,
-		UsageList:    usage,
-		AllPods:      podUsageList,
-		CurrentUsage: currentUsage,
+		Node:          node,
+		UsageList:     usage,
+		AllPods:       podUsageList,
+		NodeCiyChance: ciyScore,
+		CurrentUsage:  currentUsage,
 	}
 }
 
