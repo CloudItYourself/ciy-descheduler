@@ -44,6 +44,7 @@ import (
 	schedulingv1 "k8s.io/client-go/listers/scheduling/v1"
 	core "k8s.io/client-go/testing"
 
+	"sigs.k8s.io/descheduler/pkg/descheduler/cache"
 	"sigs.k8s.io/descheduler/pkg/descheduler/client"
 	eutils "sigs.k8s.io/descheduler/pkg/descheduler/evictions/utils"
 	nodeutil "sigs.k8s.io/descheduler/pkg/descheduler/node"
@@ -151,8 +152,10 @@ func (d *descheduler) runDeschedulerLoop(ctx context.Context, nodes []*v1.Node) 
 	} else {
 		client = d.rs.Client
 	}
-
+	// run cache
+	icache.Run(rs.MetricsCacheSyncInterval)
 	klog.V(3).Infof("Building a pod evictor")
+
 	podEvictor := evictions.NewPodEvictor(
 		client,
 		d.evictionPolicyGroupVersion,
@@ -227,6 +230,11 @@ func Run(ctx context.Context, rs *options.DeschedulerServer) error {
 		clientConnection.Kubeconfig = rs.KubeconfigFile
 	}
 	rsclient, eventClient, err := createClients(clientConnection)
+	if err != nil {
+		return err
+	}
+
+	rs.MetricsClient, err = client.CreateMetricsClient(clientConnection)
 	if err != nil {
 		return err
 	}
@@ -381,13 +389,42 @@ func cachedClient(
 	return fakeClient, nil
 }
 
+func cachedMetricsClient() (metricsclientset.Interface, error) {
+	fakeMetricsClient := fakemetricsclientset.NewSimpleClientset()
+	fakeMetricsClient.PrependReactor("list", "*", func(action core.Action) (handled bool, ret runtime.Object, err error) {
+		switch action := action.(type) {
+		case core.ListActionImpl:
+			gvr := action.GetResource()
+			if gvr.Resource == "nodes" {
+				gvr.Resource = "nodemetricses"
+			}
+			if gvr.Resource == "pods" {
+				gvr.Resource = "podmetricses"
+			}
+			ns := action.GetNamespace()
+			obj, err := fakeMetricsClient.Tracker().List(gvr, action.GetKind(), ns)
+			return true, obj, err
+		}
+		return false, nil, err
+	})
+	_, err := fakeMetricsClient.MetricsV1beta1().NodeMetricses().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("unable to list node metrics")
+	}
+	_, err = fakeMetricsClient.MetricsV1beta1().PodMetricses("").List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("unable to list pod metrics")
+	}
+	return fakeMetricsClient, nil
+}
+
 func RunDeschedulerStrategies(ctx context.Context, rs *options.DeschedulerServer, deschedulerPolicy *api.DeschedulerPolicy, evictionPolicyGroupVersion string) error {
 	var span trace.Span
 	ctx, span = tracing.Tracer().Start(ctx, "RunDeschedulerStrategies")
 	defer span.End()
 	sharedInformerFactory := informers.NewSharedInformerFactory(rs.Client, 0)
 	nodeLister := sharedInformerFactory.Core().V1().Nodes().Lister()
-
+	nodeInformer := sharedInformerFactory.Core().V1().Nodes().Informer()
 	var nodeSelector string
 	if deschedulerPolicy.NodeSelector != nil {
 		nodeSelector = *deschedulerPolicy.NodeSelector
@@ -399,6 +436,15 @@ func RunDeschedulerStrategies(ctx context.Context, rs *options.DeschedulerServer
 	} else {
 		eventClient = rs.Client
 	}
+
+	var icache cache.BasicCache
+	var metricsClient metricsclientset.Interface
+	if rs.DryRun {
+		metricsClient = fakemetricsclientset.NewSimpleClientset()
+	} else {
+		metricsClient = rs.MetricsClient
+	}
+
 	eventBroadcaster, eventRecorder := utils.GetRecorderAndBroadcaster(ctx, eventClient)
 	defer eventBroadcaster.Shutdown()
 
@@ -407,8 +453,15 @@ func RunDeschedulerStrategies(ctx context.Context, rs *options.DeschedulerServer
 		span.AddEvent("Failed to create new descheduler", trace.WithAttributes(attribute.String("err", err.Error())))
 		return err
 	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	// init real metrics cache before start informerFactory
+	icache, err = cache.InitCache(rs.Client, nodeInformer, nodeLister, podInformer, metricsClient, ctx.Done())
+	if err != nil {
+		klog.V(1).Infof("init metrics cache failed")
+	}
 
 	sharedInformerFactory.Start(ctx.Done())
 	sharedInformerFactory.WaitForCacheSync(ctx.Done())

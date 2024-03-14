@@ -31,6 +31,9 @@ type DeschedulerConfiguration struct {
 	// Time interval for descheduler to run
 	DeschedulingInterval time.Duration
 
+	//Metrics cache sync interval
+	MetricsCacheSyncInterval time.Duration
+
 	// KubeconfigFile is path to kubeconfig file with authorization and master
 	// location information.
 	// Deprecated: Use clientConnection.kubeConfig instead.

@@ -26,6 +26,7 @@ import (
 	clientset "k8s.io/client-go/kubernetes"
 	componentbaseconfig "k8s.io/component-base/config"
 	componentbaseoptions "k8s.io/component-base/config/options"
+	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
 	"sigs.k8s.io/descheduler/pkg/apis/componentconfig"
 	"sigs.k8s.io/descheduler/pkg/apis/componentconfig/v1alpha1"
 	deschedulerscheme "sigs.k8s.io/descheduler/pkg/descheduler/scheme"
@@ -42,6 +43,7 @@ type DeschedulerServer struct {
 
 	Client         clientset.Interface
 	EventClient    clientset.Interface
+	MetricsClient  metricsclientset.Interface
 	SecureServing  *apiserveroptions.SecureServingOptionsWithLoopback
 	DisableMetrics bool
 	EnableHTTP2    bool
@@ -102,6 +104,7 @@ func (rs *DeschedulerServer) AddFlags(fs *pflag.FlagSet) {
 	fs.Float64Var(&rs.Tracing.SampleRate, "otel-sample-rate", 1.0, "Sample rate to collect the Traces")
 	fs.BoolVar(&rs.Tracing.FallbackToNoOpProviderOnError, "otel-fallback-no-op-on-error", false, "Fallback to NoOp Tracer in case of error")
 	fs.BoolVar(&rs.EnableHTTP2, "enable-http2", false, "If http/2 should be enabled for the metrics and health check")
+	fs.DurationVar(&rs.MetricsCacheSyncInterval, "metrics-cache-sync-interval", rs.MetricsCacheSyncInterval, "sync metrics interval")
 
 	componentbaseoptions.BindLeaderElectionFlags(&rs.LeaderElection, fs)
 

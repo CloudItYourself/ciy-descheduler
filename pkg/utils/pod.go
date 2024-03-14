@@ -214,6 +214,26 @@ func PodToleratesTaints(pod *v1.Pod, taintsOfNodes map[string][]v1.Taint) bool {
 	return false
 }
 
+func IsPodActive(p *v1.Pod) bool {
+	return v1.PodSucceeded != p.Status.Phase &&
+		v1.PodFailed != p.Status.Phase &&
+		p.DeletionTimestamp == nil
+}
+
+func CalcContainerRestarts(pod *v1.Pod) (int32, int32) {
+	var restarts, initRestarts int32
+
+	for _, cs := range pod.Status.ContainerStatuses {
+		restarts += cs.RestartCount
+	}
+
+	for _, cs := range pod.Status.InitContainerStatuses {
+		initRestarts += cs.RestartCount
+	}
+
+	return restarts, initRestarts
+}
+
 // PodHasNodeAffinity returns true if the pod has a node affinity of type
 // `nodeAffinityType` defined. The nodeAffinityType param can take this two values:
 // "requiredDuringSchedulingIgnoredDuringExecution" or "requiredDuringSchedulingIgnoredDuringExecution"

@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/descheduler/pkg/api/v1alpha1"
 	"sigs.k8s.io/descheduler/pkg/framework/pluginregistry"
 	"sigs.k8s.io/descheduler/pkg/framework/plugins/defaultevictor"
+	"sigs.k8s.io/descheduler/pkg/framework/plugins/realutilization"
 	"sigs.k8s.io/descheduler/pkg/framework/plugins/removeduplicates"
 	"sigs.k8s.io/descheduler/pkg/framework/plugins/removepodsviolatingnodetaints"
 	deschedulerversion "sigs.k8s.io/descheduler/pkg/version"
@@ -307,6 +308,59 @@ func TestValidateVersionCompatibility(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRealUtiization(t *testing.T) {
+	pluginregistry.PluginRegistry = pluginregistry.NewRegistry()
+	pluginregistry.Register(realutilization.LowNodeRealUtilizationPluginName, realutilization.NewRealLowNodeUtilization, &realutilization.LowNodeRealUtilizationArgs{}, realutilization.ValidateLowNodeRealUtilizationArgs, realutilization.SetDefaults_LowNodeRealUtilizationArgs, pluginregistry.PluginRegistry)
+	node1 := test.BuildTestNode("n1", 2000, 3000, 10, nil)
+	node2 := test.BuildTestNode("n2", 2000, 3000, 10, nil)
+	client := fakeclientset.NewSimpleClientset(node1, node2)
+	eventClient := fakeclientset.NewSimpleClientset()
+	dp := &v1alpha1.DeschedulerPolicy{
+		Strategies: v1alpha1.StrategyList{
+			"LowNodeRealUtilization": v1alpha1.DeschedulerStrategy{
+				Enabled: true,
+				Params: &v1alpha1.StrategyParameters{
+					NodeResourceUtilizationThresholds: &v1alpha1.NodeResourceUtilizationThresholds{
+						Thresholds: v1alpha1.ResourceThresholds{
+							"cpu": v1alpha1.Percentage(40),
+						},
+						TargetThresholds: v1alpha1.ResourceThresholds{
+							"cpu": v1alpha1.Percentage(70),
+						},
+						NumberOfNodes: 10,
+					},
+				},
+			},
+		},
+	}
+
+	rs, err := options.NewDeschedulerServer()
+	if err != nil {
+		t.Fatalf("Unable to initialize server: %v", err)
+	}
+	rs.Client = client
+	rs.EventClient = eventClient
+	rs.MetricsClient, err = cachedMetricsClient()
+	rs.MetricsCacheSyncInterval = time.Millisecond * 10
+	if err != nil {
+		t.Fatalf("fake metrics client failed: %v", err)
+	}
+	rs.DeschedulingInterval = 0
+	internalDeschedulerPolicy := &api.DeschedulerPolicy{}
+	scope := scope{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+	err = v1alpha1.V1alpha1ToInternal(dp, pluginregistry.PluginRegistry, internalDeschedulerPolicy, scope)
+	if err != nil {
+		t.Fatalf("Unable to convert v1alpha1 to v1alpha2: %v", err)
+	}
+	if err := RunDeschedulerStrategies(ctx, rs, internalDeschedulerPolicy, "v1"); err != nil {
+		t.Fatalf("Unable to run descheduler strategies: %v", err)
+	}
+	<-ctx.Done()
 }
 
 func podEvictionReactionFuc(evictedPods *[]string) func(action core.Action) (bool, runtime.Object, error) {

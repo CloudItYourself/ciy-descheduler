@@ -69,6 +69,49 @@ func BuildTestDeployment(name, namespace string, replicas int32, labels map[stri
 	return deployment
 }
 
+// BuildTestNode creates a node with specified capacity.
+func BuildTestNodeMetrics(name string, millicpu, mem int64, apply func(metrics *v1beta1.NodeMetrics)) *v1beta1.NodeMetrics {
+	metrics := &v1beta1.NodeMetrics{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+		Timestamp: metav1.Now(),
+		Window:    metav1.Duration{Duration: time.Second * 10},
+		Usage: v1.ResourceList{
+			v1.ResourceCPU:    *resource.NewMilliQuantity(millicpu, resource.DecimalSI),
+			v1.ResourceMemory: *resource.NewQuantity(mem, resource.DecimalSI),
+		},
+	}
+	if apply != nil {
+		apply(metrics)
+	}
+	return metrics
+}
+
+// BuildTestNode creates a node with specified capacity.
+func BuildTestPodMetrics(name string, millicpu, mem int64, apply func(metrics *v1beta1.PodMetrics)) *v1beta1.PodMetrics {
+	metrics := &v1beta1.PodMetrics{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+		},
+		Timestamp: metav1.Now(),
+		Window:    metav1.Duration{Duration: time.Second * 10},
+		Containers: []v1beta1.ContainerMetrics{
+			{
+				Usage: v1.ResourceList{
+					v1.ResourceCPU:    *resource.NewMilliQuantity(millicpu, resource.DecimalSI),
+					v1.ResourceMemory: *resource.NewQuantity(mem, resource.DecimalSI),
+				},
+			},
+		},
+	}
+	if apply != nil {
+		apply(metrics)
+	}
+	return metrics
+}
+
 // BuildTestPod creates a test pod with given parameters.
 func BuildTestPod(name string, cpu, memory int64, nodeName string, apply func(*v1.Pod)) *v1.Pod {
 	pod := &v1.Pod{

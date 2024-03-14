@@ -59,6 +59,32 @@ func CreateClient(clientConnection componentbaseconfig.ClientConnectionConfigura
 	return clientset.NewForConfig(cfg)
 }
 
+func CreateMetricsClient(clientConnection componentbaseconfig.ClientConnectionConfiguration) (*metricsclientset.Clientset, error) {
+	var cfg *rest.Config
+	if len(clientConnection.Kubeconfig) != 0 {
+		master, err := GetMasterFromKubeconfig(clientConnection.Kubeconfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse kubeconfig file: %v ", err)
+		}
+
+		cfg, err = clientcmd.BuildConfigFromFlags(master, clientConnection.Kubeconfig)
+		if err != nil {
+			return nil, fmt.Errorf("unable to build config: %v", err)
+		}
+
+	} else {
+		var err error
+		cfg, err = rest.InClusterConfig()
+		if err != nil {
+			return nil, fmt.Errorf("unable to build in cluster config: %v", err)
+		}
+	}
+
+	cfg.Burst = int(clientConnection.Burst)
+	cfg.QPS = clientConnection.QPS
+	return metricsclientset.NewForConfig(cfg)
+}
+
 func GetMasterFromKubeconfig(filename string) (string, error) {
 	config, err := clientcmd.LoadFromFile(filename)
 	if err != nil {
