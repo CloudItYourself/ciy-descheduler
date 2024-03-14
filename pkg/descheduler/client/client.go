@@ -21,6 +21,7 @@ import (
 
 	clientset "k8s.io/client-go/kubernetes"
 	componentbaseconfig "k8s.io/component-base/config"
+	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
 
 	// Ensure to load all auth plugins.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"

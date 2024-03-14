@@ -33,7 +33,6 @@ import (
 	"sigs.k8s.io/descheduler/pkg/framework/plugins/removepodsviolatingnodeaffinity"
 	"sigs.k8s.io/descheduler/pkg/framework/plugins/removepodsviolatingnodetaints"
 	"sigs.k8s.io/descheduler/pkg/framework/plugins/removepodsviolatingtopologyspreadconstraint"
-	"sigs.k8s.io/descheduler/pkg/framework/plugins/realutilization"
 )
 
 // Once all strategies are migrated the arguments get read from the configuration file

@@ -40,6 +40,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
+	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
+	fakemetricsclientset "k8s.io/metrics/pkg/client/clientset/versioned/fake"
+
 	listersv1 "k8s.io/client-go/listers/core/v1"
 	schedulingv1 "k8s.io/client-go/listers/scheduling/v1"
 	core "k8s.io/client-go/testing"
@@ -72,6 +75,7 @@ type profileRunner struct {
 type descheduler struct {
 	rs                         *options.DeschedulerServer
 	podLister                  listersv1.PodLister
+	icache                     cache.BasicCache
 	nodeLister                 listersv1.NodeLister
 	namespaceLister            listersv1.NamespaceLister
 	priorityClassLister        schedulingv1.PriorityClassLister
@@ -153,7 +157,7 @@ func (d *descheduler) runDeschedulerLoop(ctx context.Context, nodes []*v1.Node) 
 		client = d.rs.Client
 	}
 	// run cache
-	icache.Run(rs.MetricsCacheSyncInterval)
+	d.icache.Run(d.rs.MetricsCacheSyncInterval)
 	klog.V(3).Infof("Building a pod evictor")
 
 	podEvictor := evictions.NewPodEvictor(
@@ -425,6 +429,8 @@ func RunDeschedulerStrategies(ctx context.Context, rs *options.DeschedulerServer
 	sharedInformerFactory := informers.NewSharedInformerFactory(rs.Client, 0)
 	nodeLister := sharedInformerFactory.Core().V1().Nodes().Lister()
 	nodeInformer := sharedInformerFactory.Core().V1().Nodes().Informer()
+	podInformer := sharedInformerFactory.Core().V1().Pods().Informer()
+
 	var nodeSelector string
 	if deschedulerPolicy.NodeSelector != nil {
 		nodeSelector = *deschedulerPolicy.NodeSelector
@@ -437,7 +443,6 @@ func RunDeschedulerStrategies(ctx context.Context, rs *options.DeschedulerServer
 		eventClient = rs.Client
 	}
 
-	var icache cache.BasicCache
 	var metricsClient metricsclientset.Interface
 	if rs.DryRun {
 		metricsClient = fakemetricsclientset.NewSimpleClientset()
@@ -458,7 +463,7 @@ func RunDeschedulerStrategies(ctx context.Context, rs *options.DeschedulerServer
 	defer cancel()
 
 	// init real metrics cache before start informerFactory
-	icache, err = cache.InitCache(rs.Client, nodeInformer, nodeLister, podInformer, metricsClient, ctx.Done())
+	descheduler.icache, err = cache.InitCache(rs.Client, nodeInformer, nodeLister, podInformer, metricsClient, ctx.Done())
 	if err != nil {
 		klog.V(1).Infof("init metrics cache failed")
 	}

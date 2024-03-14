@@ -19,9 +19,9 @@ import (
 	"sigs.k8s.io/descheduler/pkg/descheduler/cache"
 	"sigs.k8s.io/descheduler/pkg/descheduler/evictions"
 	podutil "sigs.k8s.io/descheduler/pkg/descheduler/pod"
-	"sigs.k8s.io/descheduler/pkg/framework"
 	frameworkfake "sigs.k8s.io/descheduler/pkg/framework/fake"
 	"sigs.k8s.io/descheduler/pkg/framework/plugins/defaultevictor"
+	frameworktypes "sigs.k8s.io/descheduler/pkg/framework/types"
 	"sigs.k8s.io/descheduler/test"
 )
 
@@ -210,11 +210,11 @@ func TestRealLowNodeUtilization(t *testing.T) {
 				ClientsetImpl:                 fakeClient,
 				GetPodsAssignedToNodeFuncImpl: getPodsAssignedToNode,
 				PodEvictorImpl:                podEvictor,
-				EvictorFilterImpl:             evictorFilter.(framework.EvictorPlugin),
+				EvictorFilterImpl:             evictorFilter.(frameworktypes.EvictorPlugin),
 				SharedInformerFactoryImpl:     sharedInformerFactory,
 			}
 
-			plugin, err := NewRealLowNodeUtilization(&LowNodeRealUtilizationArgs{
+			plugin, err := New(&LowNodeRealUtilizationArgs{
 				Thresholds:          test.thresholds,
 				TargetThresholds:    test.targetThresholds,
 				EvictableNamespaces: test.evictableNamespaces,
@@ -222,7 +222,7 @@ func TestRealLowNodeUtilization(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Unable to initialize the plugin: %v", err)
 			}
-			plugin.(framework.BalancePlugin).Balance(ctx, test.nodes)
+			plugin.(frameworktypes.BalancePlugin).Balance(ctx, test.nodes)
 
 			podsEvicted := podEvictor.TotalEvicted()
 			if test.expectedPodsEvicted != podsEvicted {
