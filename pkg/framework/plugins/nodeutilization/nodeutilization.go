@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/descheduler/pkg/descheduler/evictions"
-	deschedulernode "sigs.k8s.io/descheduler/pkg/descheduler/node"
 	nodeutil "sigs.k8s.io/descheduler/pkg/descheduler/node"
 	podutil "sigs.k8s.io/descheduler/pkg/descheduler/pod"
 	"sigs.k8s.io/descheduler/pkg/framework/plugins/realutilization"
@@ -279,7 +278,7 @@ func evictPodsFromSourceNodes(
 			"Pods", totalAvailableUsageForNode[v1.ResourcePods].Value(),
 		}
 		for name := range totalAvailableUsageForNode {
-			if !deschedulernode.IsBasicResource(name) {
+			if !nodeutil.IsBasicResource(name) {
 				keysAndValues = append(keysAndValues, string(name), totalAvailableUsageForNode[name].Value())
 			}
 		}
