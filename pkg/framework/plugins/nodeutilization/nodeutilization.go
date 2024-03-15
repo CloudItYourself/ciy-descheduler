@@ -258,7 +258,7 @@ func evictPodsFromSourceNodes(
 
 		taintsOfDestinationNodes := make(map[string][]v1.Taint, len(destinationNodes))
 		for _, destNode := range destinationNodes {
-			if nodeCiyScores[node.node.Name] < nodeCiyScores[destNode.node.Name] { // only nodes with higher chances will actually be scheduled
+			if nodeCiyScores[node.node.Name] <= nodeCiyScores[destNode.node.Name] { // only nodes with higher chances will actually be scheduled
 				taintsOfDestinationNodes[destNode.node.Name] = destNode.node.Spec.Taints
 
 				for _, name := range resourceNames {
