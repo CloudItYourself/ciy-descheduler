@@ -28,9 +28,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/descheduler/pkg/descheduler/evictions"
-	"sigs.k8s.io/descheduler/pkg/descheduler/node"
+	deschedulernode "sigs.k8s.io/descheduler/pkg/descheduler/node"
 	nodeutil "sigs.k8s.io/descheduler/pkg/descheduler/node"
 	podutil "sigs.k8s.io/descheduler/pkg/descheduler/pod"
+	"sigs.k8s.io/descheduler/pkg/framework/plugins/realutilization"
 	frameworktypes "sigs.k8s.io/descheduler/pkg/framework/types"
 	"sigs.k8s.io/descheduler/pkg/utils"
 )
@@ -226,40 +227,64 @@ func evictPodsFromSourceNodes(
 	resourceNames []v1.ResourceName,
 	continueEviction continueEvictionCond,
 ) {
-	// upper bound on total number of pods/cpu/memory and optional extended resources to be moved
-	totalAvailableUsage := map[v1.ResourceName]*resource.Quantity{
-		v1.ResourcePods:   {},
-		v1.ResourceCPU:    {},
-		v1.ResourceMemory: {},
-	}
-
-	taintsOfDestinationNodes := make(map[string][]v1.Taint, len(destinationNodes))
-	for _, node := range destinationNodes {
-		taintsOfDestinationNodes[node.node.Name] = node.node.Spec.Taints
-
-		for _, name := range resourceNames {
-			if _, ok := totalAvailableUsage[name]; !ok {
-				totalAvailableUsage[name] = resource.NewQuantity(0, resource.DecimalSI)
-			}
-			totalAvailableUsage[name].Add(*node.thresholds.highResourceThreshold[name])
-			totalAvailableUsage[name].Sub(*node.usage[name])
-		}
-	}
-
-	// log message in one line
-	keysAndValues := []interface{}{
-		"CPU", totalAvailableUsage[v1.ResourceCPU].MilliValue(),
-		"Mem", totalAvailableUsage[v1.ResourceMemory].Value(),
-		"Pods", totalAvailableUsage[v1.ResourcePods].Value(),
-	}
-	for name := range totalAvailableUsage {
-		if !node.IsBasicResource(name) {
-			keysAndValues = append(keysAndValues, string(name), totalAvailableUsage[name].Value())
-		}
-	}
-	klog.V(1).InfoS("Total capacity to be moved", keysAndValues...)
-
+	nodeNamesMap := make(map[string]*v1.Node)
 	for _, node := range sourceNodes {
+		nodeNamesMap[node.node.Name] = node.node
+	}
+
+	for _, node := range destinationNodes {
+		nodeNamesMap[node.node.Name] = node.node
+	}
+
+	nodeNames := make([]*v1.Node, 0, len(nodeNamesMap))
+	for _, node := range nodeNamesMap {
+		nodeNames = append(nodeNames, node)
+	}
+
+	nodeUsageList := realutilization.GetNodeRealUsage(nodeNames)
+
+	nodeCiyScores := make(map[string]int64)
+
+	for i, node := range nodeNames {
+		nodeCiyScores[node.Name] = nodeUsageList[i].NodeCiyChance
+	}
+
+	// upper bound on total number of pods/cpu/memory and optional extended resources to be moved
+	for _, node := range sourceNodes {
+		totalAvailableUsageForNode := map[v1.ResourceName]*resource.Quantity{
+			v1.ResourcePods:   {},
+			v1.ResourceCPU:    {},
+			v1.ResourceMemory: {},
+		}
+
+		taintsOfDestinationNodes := make(map[string][]v1.Taint, len(destinationNodes))
+		for _, destNode := range destinationNodes {
+			if nodeCiyScores[node.node.Name] < nodeCiyScores[destNode.node.Name] { // only nodes with higher chances will actually be scheduled
+				taintsOfDestinationNodes[destNode.node.Name] = destNode.node.Spec.Taints
+
+				for _, name := range resourceNames {
+					if _, ok := totalAvailableUsageForNode[name]; !ok {
+						totalAvailableUsageForNode[name] = resource.NewQuantity(0, resource.DecimalSI)
+					}
+					totalAvailableUsageForNode[name].Add(*destNode.thresholds.highResourceThreshold[name])
+					totalAvailableUsageForNode[name].Sub(*destNode.usage[name])
+				}
+			}
+		}
+
+		// log message in one line
+		keysAndValues := []interface{}{
+			"CPU", totalAvailableUsageForNode[v1.ResourceCPU].MilliValue(),
+			"Mem", totalAvailableUsageForNode[v1.ResourceMemory].Value(),
+			"Pods", totalAvailableUsageForNode[v1.ResourcePods].Value(),
+		}
+		for name := range totalAvailableUsageForNode {
+			if !deschedulernode.IsBasicResource(name) {
+				keysAndValues = append(keysAndValues, string(name), totalAvailableUsageForNode[name].Value())
+			}
+		}
+		klog.V(1).InfoS("Total capacity to be moved", keysAndValues...)
+
 		klog.V(3).InfoS("Evicting pods from node", "node", klog.KObj(node.node), "usage", node.usage)
 
 		nonRemovablePods, removablePods := classifyPods(node.allPods, podFilter)
@@ -273,7 +298,7 @@ func evictPodsFromSourceNodes(
 		klog.V(1).InfoS("Evicting pods based on priority, if they have same priority, they'll be evicted based on QoS tiers")
 		// sort the evictable Pods based on priority. This also sorts them based on QoS. If there are multiple pods with same priority, they are sorted based on QoS tiers.
 		podutil.SortPodsBasedOnPriorityLowToHigh(removablePods)
-		evictPods(ctx, evictableNamespaces, removablePods, node, totalAvailableUsage, taintsOfDestinationNodes, podEvictor, continueEviction)
+		evictPods(ctx, evictableNamespaces, removablePods, node, totalAvailableUsageForNode, taintsOfDestinationNodes, podEvictor, continueEviction)
 
 	}
 }

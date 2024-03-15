@@ -90,7 +90,7 @@ func (l *RealLowNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) 
 	resourceNames := getResourceNames(thresholds)
 
 	lowNodes, sourceNodes := classifyNodesWithReal(
-		getNodeRealUsage(nodes),
+		GetNodeRealUsage(nodes),
 		getNodeThresholds(nodes, thresholds, targetThresholds, resourceNames),
 		// The node has to be schedulable (to be able to move workload there)
 		func(node *v1.Node, usage cache.NodeUsageMap, threshold NodeThresholds) bool {
@@ -230,7 +230,7 @@ func resourceThreshold(nodeCapacity v1.ResourceList, resourceName v1.ResourceNam
 	return resource.NewQuantity(resourceCapacityFraction(resourceCapacityQuantity.Value()), defaultFormat)
 }
 
-func getNodeRealUsage(
+func GetNodeRealUsage(
 	nodes []*v1.Node,
 ) []*cache.NodeUsageMap {
 	usageCache := cache.GetCache()

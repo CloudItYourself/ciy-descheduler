@@ -120,14 +120,14 @@ func evictPodsFromSourceNodesWithReal(
 		taintsOfDestinationNodes := make(map[string][]v1.Taint, len(destinationNodes))
 		for _, destNode := range destinationNodes {
 			if node.NodeCiyChance < destNode.NodeCiyChance { // only nodes with higher chances will actually be scheduled
-				taintsOfDestinationNodes[node.Node.Name] = node.Node.Spec.Taints
+				taintsOfDestinationNodes[destNode.Node.Name] = destNode.Node.Spec.Taints
 
 				for _, name := range resourceNames {
 					if _, ok := totalAvailableUsageForNode[name]; !ok {
 						totalAvailableUsageForNode[name] = resource.NewQuantity(0, resource.DecimalSI)
 					}
-					totalAvailableUsageForNode[name].Add(*node.threshold.highResourceThreshold[name])
-					totalAvailableUsageForNode[name].Sub(node.CurrentUsage[name])
+					totalAvailableUsageForNode[name].Add(*destNode.threshold.highResourceThreshold[name])
+					totalAvailableUsageForNode[name].Sub(destNode.CurrentUsage[name])
 				}
 			}
 			// log message in one line
