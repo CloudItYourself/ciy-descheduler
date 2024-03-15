@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/descheduler/pkg/api"
 	"sigs.k8s.io/descheduler/pkg/descheduler/cache"
 	"sigs.k8s.io/descheduler/pkg/descheduler/evictions"
+	deschedulernode "sigs.k8s.io/descheduler/pkg/descheduler/node"
 	podutil "sigs.k8s.io/descheduler/pkg/descheduler/pod"
 	frameworktypes "sigs.k8s.io/descheduler/pkg/framework/types"
 	"sigs.k8s.io/descheduler/pkg/utils"
@@ -136,7 +137,7 @@ func evictPodsFromSourceNodesWithReal(
 			"Mem", totalAvailableUsageForNode[v1.ResourceMemory].Value(),
 		}
 		for name := range totalAvailableUsageForNode {
-			if !node.IsBasicResource(name) {
+			if !deschedulernode.IsBasicResource(name) {
 				keysAndValues = append(keysAndValues, string(name), totalAvailableUsageForNode[name].Value())
 			}
 		}
