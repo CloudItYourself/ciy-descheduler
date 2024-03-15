@@ -2,6 +2,7 @@ package realutilization
 
 import (
 	"context"
+	"fmt"
 	"sort"
 
 	v1 "k8s.io/api/core/v1"
@@ -11,7 +12,6 @@ import (
 	"sigs.k8s.io/descheduler/pkg/api"
 	"sigs.k8s.io/descheduler/pkg/descheduler/cache"
 	"sigs.k8s.io/descheduler/pkg/descheduler/evictions"
-	"sigs.k8s.io/descheduler/pkg/descheduler/node"
 	podutil "sigs.k8s.io/descheduler/pkg/descheduler/pod"
 	frameworktypes "sigs.k8s.io/descheduler/pkg/framework/types"
 	"sigs.k8s.io/descheduler/pkg/utils"
@@ -109,38 +109,38 @@ func evictPodsFromSourceNodesWithReal(
 	resourceNames []v1.ResourceName,
 	continueEviction continueEvictionCondReal,
 ) {
-	// upper bound on total number of pods/cpu/memory and optional extended resources to be moved
-	totalAvailableUsage := map[v1.ResourceName]*resource.Quantity{
-		v1.ResourceCPU:    {},
-		v1.ResourceMemory: {},
-	}
-
-	taintsOfDestinationNodes := make(map[string][]v1.Taint, len(destinationNodes))
-	for _, node := range destinationNodes {
-		taintsOfDestinationNodes[node.Node.Name] = node.Node.Spec.Taints
-
-		for _, name := range resourceNames {
-			if _, ok := totalAvailableUsage[name]; !ok {
-				totalAvailableUsage[name] = resource.NewQuantity(0, resource.DecimalSI)
-			}
-			totalAvailableUsage[name].Add(*node.threshold.highResourceThreshold[name])
-			totalAvailableUsage[name].Sub(node.CurrentUsage[name])
-		}
-	}
-
-	// log message in one line
-	keysAndValues := []interface{}{
-		"CPU", totalAvailableUsage[v1.ResourceCPU].MilliValue(),
-		"Mem", totalAvailableUsage[v1.ResourceMemory].Value(),
-	}
-	for name := range totalAvailableUsage {
-		if !node.IsBasicResource(name) {
-			keysAndValues = append(keysAndValues, string(name), totalAvailableUsage[name].Value())
-		}
-	}
-	klog.V(1).InfoS("Total capacity to be moved", keysAndValues...)
 
 	for _, node := range sourceNodes {
+		totalAvailableUsageForNode := map[v1.ResourceName]*resource.Quantity{
+			v1.ResourceCPU:    {},
+			v1.ResourceMemory: {},
+		}
+
+		taintsOfDestinationNodes := make(map[string][]v1.Taint, len(destinationNodes))
+		for _, destNode := range destinationNodes {
+			if node.NodeCiyChance < destNode.NodeCiyChance { // only nodes with higher chances will actually be scheduled
+				taintsOfDestinationNodes[node.Node.Name] = node.Node.Spec.Taints
+
+				for _, name := range resourceNames {
+					if _, ok := totalAvailableUsageForNode[name]; !ok {
+						totalAvailableUsageForNode[name] = resource.NewQuantity(0, resource.DecimalSI)
+					}
+					totalAvailableUsageForNode[name].Add(*node.threshold.highResourceThreshold[name])
+					totalAvailableUsageForNode[name].Sub(node.CurrentUsage[name])
+				}
+			}
+			// log message in one line
+		}
+		keysAndValues := []interface{}{
+			"CPU", totalAvailableUsageForNode[v1.ResourceCPU].MilliValue(),
+			"Mem", totalAvailableUsageForNode[v1.ResourceMemory].Value(),
+		}
+		for name := range totalAvailableUsageForNode {
+			if !node.IsBasicResource(name) {
+				keysAndValues = append(keysAndValues, string(name), totalAvailableUsageForNode[name].Value())
+			}
+		}
+		klog.V(1).InfoS(fmt.Sprintf("Total capacity to be moved for node %s", node.Node.Name), keysAndValues...)
 		klog.V(3).InfoS("Evicting pods from node", "node", klog.KObj(node.Node), "usage", node.CurrentUsage)
 		nonRemovablePods, removablePods := classifyPodsWithReal(node.AllPods, podFilter)
 		klog.V(2).InfoS("Pods on node", "node", klog.KObj(node.Node), "allPods", len(node.AllPods), "nonRemovablePods", len(nonRemovablePods), "removablePods", len(removablePods))
@@ -153,8 +153,7 @@ func evictPodsFromSourceNodesWithReal(
 		klog.V(1).InfoS("Evicting pods based on priority, if they have same priority, they'll be evicted based on QoS tiers")
 		// sort the evictable Pods based on priority. This also sorts them based on QoS. If there are multiple pods with same priority, they are sorted based on QoS tiers.
 		SortPodsBasedOnPriorityLowToHigh(removablePods)
-		evictPodsWithReal(ctx, evictableNamespaces, removablePods, node, totalAvailableUsage, taintsOfDestinationNodes, podEvictor, continueEviction)
-
+		evictPodsWithReal(ctx, evictableNamespaces, removablePods, node, totalAvailableUsageForNode, taintsOfDestinationNodes, podEvictor, continueEviction)
 	}
 }
 
