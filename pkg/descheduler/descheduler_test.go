@@ -312,7 +312,7 @@ func TestValidateVersionCompatibility(t *testing.T) {
 
 func TestRealUtiization(t *testing.T) {
 	pluginregistry.PluginRegistry = pluginregistry.NewRegistry()
-	pluginregistry.Register(realutilization.LowNodeRealUtilizationPluginName, realutilization.New, realutilization.RealLowNodeUtilization{}, &realutilization.LowNodeRealUtilizationArgs{}, realutilization.ValidateLowNodeRealUtilizationArgs, realutilization.SetDefaults_LowNodeRealUtilizationArgs, pluginregistry.PluginRegistry)
+	pluginregistry.Register(realutilization.LowNodeRealUtilizationPluginName, realutilization.NewLowNodeRealUtilization, realutilization.RealLowNodeUtilization{}, &realutilization.LowNodeRealUtilizationArgs{}, realutilization.ValidateLowNodeRealUtilizationArgs, realutilization.SetDefaults_LowNodeRealUtilizationArgs, pluginregistry.PluginRegistry)
 	node1 := test.BuildTestNode("n1", 2000, 3000, 10, nil)
 	node2 := test.BuildTestNode("n2", 2000, 3000, 10, nil)
 	client := fakeclientset.NewSimpleClientset(node1, node2)

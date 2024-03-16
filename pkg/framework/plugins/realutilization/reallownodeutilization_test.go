@@ -214,7 +214,7 @@ func TestRealLowNodeUtilization(t *testing.T) {
 				SharedInformerFactoryImpl:     sharedInformerFactory,
 			}
 
-			plugin, err := New(&LowNodeRealUtilizationArgs{
+			plugin, err := NewLowNodeRealUtilization(&LowNodeRealUtilizationArgs{
 				Thresholds:          test.thresholds,
 				TargetThresholds:    test.targetThresholds,
 				EvictableNamespaces: test.evictableNamespaces,

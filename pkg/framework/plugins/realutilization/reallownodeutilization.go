@@ -18,6 +18,8 @@ import (
 // LowNodeUtilization evicts pods from overutilized nodes to underutilized nodes. Note that CPU/Memory requests are used
 // to calculate nodes' utilization and not the actual resource usage.
 
+const LowNodeRealUtilizationPluginName = "LowNodeRealUtilization"
+
 type RealLowNodeUtilization struct {
 	handle    frameworktypes.Handle
 	args      *LowNodeRealUtilizationArgs
@@ -26,7 +28,7 @@ type RealLowNodeUtilization struct {
 
 var _ frameworktypes.BalancePlugin = &RealLowNodeUtilization{}
 
-func New(args runtime.Object, handle frameworktypes.Handle) (frameworktypes.Plugin, error) {
+func NewLowNodeRealUtilization(args runtime.Object, handle frameworktypes.Handle) (frameworktypes.Plugin, error) {
 	lowNodeRealUtilizationArgsArgs, ok := args.(*LowNodeRealUtilizationArgs)
 	if !ok {
 		return nil, fmt.Errorf("want args to be of type LowNodeRealUtilizationArgsArgs, got %T", args)
@@ -45,8 +47,6 @@ func New(args runtime.Object, handle frameworktypes.Handle) (frameworktypes.Plug
 		podFilter: podFilter,
 	}, nil
 }
-
-const LowNodeRealUtilizationPluginName = "LowNodeRealUtilization"
 
 // Name retrieves the plugin name
 func (l *RealLowNodeUtilization) Name() string {
