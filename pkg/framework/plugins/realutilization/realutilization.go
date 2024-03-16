@@ -2,7 +2,6 @@ package realutilization
 
 import (
 	"context"
-	"fmt"
 	"sort"
 
 	v1 "k8s.io/api/core/v1"
@@ -12,7 +11,6 @@ import (
 	"sigs.k8s.io/descheduler/pkg/api"
 	"sigs.k8s.io/descheduler/pkg/descheduler/cache"
 	"sigs.k8s.io/descheduler/pkg/descheduler/evictions"
-	deschedulernode "sigs.k8s.io/descheduler/pkg/descheduler/node"
 	podutil "sigs.k8s.io/descheduler/pkg/descheduler/pod"
 	frameworktypes "sigs.k8s.io/descheduler/pkg/framework/types"
 	"sigs.k8s.io/descheduler/pkg/utils"
@@ -85,7 +83,6 @@ func IsNodeWithLowUtilization(nodeThresholds v1.ResourceList, thresholds map[v1.
 	return true
 }
 
-// 检查最近n次的状态是否完全匹配
 func CheckNodeByWindowLatestCt(nodeThresholdsList []v1.ResourceList, thresholds map[v1.ResourceName]*resource.Quantity, f checkNodeFunc, latestCt int) bool {
 	if len(nodeThresholdsList) == 0 || len(nodeThresholdsList) < latestCt {
 		// metrics is empty
@@ -99,7 +96,7 @@ func CheckNodeByWindowLatestCt(nodeThresholdsList []v1.ResourceList, thresholds 
 	return true
 }
 
-type continueEvictionCondReal func(nodeInfo RealNodeInfo, totalAvailableUsage map[v1.ResourceName]*resource.Quantity) bool
+type continueEvictionCondReal func(nodeInfo RealNodeInfo, totalAvailableUsage *map[string]map[v1.ResourceName]*resource.Quantity) bool
 
 func evictPodsFromSourceNodesWithReal(
 	ctx context.Context,
@@ -110,38 +107,38 @@ func evictPodsFromSourceNodesWithReal(
 	resourceNames []v1.ResourceName,
 	continueEviction continueEvictionCondReal,
 ) {
+	availableUsageMap := map[string]map[v1.ResourceName]*resource.Quantity{}
+
+	taintsOfDestinationNodes := make(map[string][]v1.Taint, len(destinationNodes))
+	for _, destNode := range destinationNodes {
+		taintsOfDestinationNodes[destNode.Node.Name] = destNode.Node.Spec.Taints
+		nodeName := destNode.Node.Name
+		for _, name := range resourceNames {
+			if _, ok := availableUsageMap[nodeName]; !ok {
+				availableUsageMap[nodeName] = map[v1.ResourceName]*resource.Quantity{
+					v1.ResourceCPU:    {},
+					v1.ResourceMemory: {},
+				}
+			}
+			if _, ok := availableUsageMap[nodeName][name]; !ok {
+				availableUsageMap[nodeName][name] = resource.NewQuantity(0, resource.DecimalSI)
+			}
+			availableUsageMap[nodeName][name].Add(*destNode.threshold.highResourceThreshold[name])
+			availableUsageMap[nodeName][name].Sub(destNode.CurrentUsage[name])
+		}
+		// log message in one line
+	}
 
 	for _, node := range sourceNodes {
-		totalAvailableUsageForNode := map[v1.ResourceName]*resource.Quantity{
-			v1.ResourceCPU:    {},
-			v1.ResourceMemory: {},
-		}
+		availableUsageMapForNode := map[string]map[v1.ResourceName]*resource.Quantity{}
 
-		taintsOfDestinationNodes := make(map[string][]v1.Taint, len(destinationNodes))
 		for _, destNode := range destinationNodes {
 			if node.NodeCiyChance <= destNode.NodeCiyChance { // only nodes with higher chances will actually be scheduled
-				taintsOfDestinationNodes[destNode.Node.Name] = destNode.Node.Spec.Taints
-
-				for _, name := range resourceNames {
-					if _, ok := totalAvailableUsageForNode[name]; !ok {
-						totalAvailableUsageForNode[name] = resource.NewQuantity(0, resource.DecimalSI)
-					}
-					totalAvailableUsageForNode[name].Add(*destNode.threshold.highResourceThreshold[name])
-					totalAvailableUsageForNode[name].Sub(destNode.CurrentUsage[name])
-				}
+				availableUsageMapForNode[destNode.Node.Name] = availableUsageMap[destNode.Node.Name]
 			}
 			// log message in one line
 		}
-		keysAndValues := []interface{}{
-			"CPU", totalAvailableUsageForNode[v1.ResourceCPU].MilliValue(),
-			"Mem", totalAvailableUsageForNode[v1.ResourceMemory].Value(),
-		}
-		for name := range totalAvailableUsageForNode {
-			if !deschedulernode.IsBasicResource(name) {
-				keysAndValues = append(keysAndValues, string(name), totalAvailableUsageForNode[name].Value())
-			}
-		}
-		klog.V(1).InfoS(fmt.Sprintf("Total capacity to be moved for node %s", node.Node.Name), keysAndValues...)
+
 		klog.V(3).InfoS("Evicting pods from node", "node", klog.KObj(node.Node), "usage", node.CurrentUsage)
 		nonRemovablePods, removablePods := classifyPodsWithReal(node.AllPods, podFilter)
 		klog.V(2).InfoS("Pods on node", "node", klog.KObj(node.Node), "allPods", len(node.AllPods), "nonRemovablePods", len(nonRemovablePods), "removablePods", len(removablePods))
@@ -154,7 +151,7 @@ func evictPodsFromSourceNodesWithReal(
 		klog.V(1).InfoS("Evicting pods based on priority, if they have same priority, they'll be evicted based on QoS tiers")
 		// sort the evictable Pods based on priority. This also sorts them based on QoS. If there are multiple pods with same priority, they are sorted based on QoS tiers.
 		SortPodsBasedOnPriorityLowToHigh(removablePods)
-		evictPodsWithReal(ctx, evictableNamespaces, removablePods, node, totalAvailableUsageForNode, taintsOfDestinationNodes, podEvictor, continueEviction)
+		evictPodsWithReal(ctx, evictableNamespaces, removablePods, node, &availableUsageMapForNode, taintsOfDestinationNodes, podEvictor, continueEviction)
 	}
 }
 
@@ -212,7 +209,7 @@ func evictPodsWithReal(
 	evictableNamespaces *api.Namespaces,
 	inputPods []*cache.PodUsageMap,
 	nodeInfo RealNodeInfo,
-	totalAvailableUsage map[v1.ResourceName]*resource.Quantity,
+	totalAvailableUsage *map[string]map[v1.ResourceName]*resource.Quantity,
 	taintsOfLowNodes map[string][]v1.Taint,
 	podEvictor frameworktypes.Evictor,
 	continueEviction continueEvictionCondReal,
@@ -256,28 +253,34 @@ func evictPodsWithReal(
 			}
 
 			if preEvictionFilterWithOptions(pod) {
-				if podEvictor.Evict(ctx, pod, evictions.EvictOptions{}) {
-					klog.V(3).InfoS("Evicted pods", "pod", klog.KObj(pod))
-					for name := range totalAvailableUsage {
-						quantity := podCurrentUsage[name]
-						currentUsage := nodeInfo.CurrentUsage[name]
-						currentUsage.Sub(quantity)
-						nodeInfo.CurrentUsage[name] = currentUsage
-						totalAvailableUsage[name].Sub(quantity)
-					}
-					currentNodeUsage := nodeInfo.CurrentUsage
-					cpuUsage := currentNodeUsage[v1.ResourceCPU]
-					memUsage := currentNodeUsage[v1.ResourceMemory]
+				for evictedNode, nodeDetails := range *totalAvailableUsage {
+					availableCPU := nodeDetails[v1.ResourceCPU]
+					availableMemory := nodeDetails[v1.ResourceMemory]
 
-					keysAndValues := []interface{}{
-						"node", nodeInfo.Node.Name,
-						"CPU", cpuUsage.MilliValue(),
-						"Mem", memUsage.Value(),
-					}
+					podCPUUsage := podCurrentUsage[v1.ResourceCPU]
+					podMemoryUsage := podCurrentUsage[v1.ResourceMemory]
 
-					klog.V(3).InfoS("Updated node usage", keysAndValues...)
-					// check if pods can be still evicted
-					if !continueEviction(nodeInfo, totalAvailableUsage) {
+					if podCPUUsage.MilliValue() <= availableCPU.MilliValue() && podMemoryUsage.MilliValue() <= availableMemory.MilliValue() {
+						if podEvictor.Evict(ctx, pod, evictions.EvictOptions{}) {
+
+							nodeDetails[v1.ResourceCPU].Sub(podCPUUsage)
+							nodeDetails[v1.ResourceMemory].Sub(podMemoryUsage)
+							currentNodeUsage := nodeInfo.CurrentUsage
+							cpuUsage := currentNodeUsage[v1.ResourceCPU]
+							memUsage := currentNodeUsage[v1.ResourceMemory]
+
+							keysAndValues := []interface{}{
+								"node", nodeInfo.Node.Name,
+								"evicted node", evictedNode,
+								"CPU", cpuUsage.MilliValue(),
+								"Mem", memUsage.Value(),
+							}
+							klog.V(3).InfoS("Updated node usage", keysAndValues...)
+							// check if pods can be still evicted
+							if !continueEviction(nodeInfo, totalAvailableUsage) {
+								return
+							}
+						}
 						break
 					}
 				}

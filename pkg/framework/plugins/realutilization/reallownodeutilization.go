@@ -144,15 +144,18 @@ func (l *RealLowNodeUtilization) Balance(ctx context.Context, nodes []*v1.Node) 
 	}
 
 	// stop if node utilization drops below target threshold or any of required capacity (cpu, memory, pods) is moved
-	continueEvictionCond := func(nodeInfo RealNodeInfo, totalAvailableUsage map[v1.ResourceName]*resource.Quantity) bool {
+	continueEvictionCond := func(nodeInfo RealNodeInfo, totalAvailableUsage *map[string]map[v1.ResourceName]*resource.Quantity) bool {
 		if !IsNodeAboveTargetUtilization(nodeInfo.CurrentUsage, nodeInfo.threshold.highResourceThreshold) {
 			return false
 		}
-		for name := range totalAvailableUsage {
-			if totalAvailableUsage[name].CmpInt64(0) < 1 {
-				return false
+		for _, details := range *totalAvailableUsage {
+			for _, value := range details {
+				if value.CmpInt64(0) < 1 {
+					return false
+				}
 			}
 		}
+
 		return true
 	}
 
