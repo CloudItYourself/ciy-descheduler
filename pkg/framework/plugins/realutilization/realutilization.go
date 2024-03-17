@@ -40,10 +40,10 @@ func classifyNodesWithReal(
 			threshold:    nodeThresholds[node.Name],
 		}
 		if lowThresholdFilter(nodeUsage.Node, nodeUsage, nodeThresholds[node.Name]) {
-			klog.InfoS("Node is underutilized", "node", klog.KObj(nodeUsage.Node), "usage", nodeUsage.CurrentUsage, "thresholds", nodeThresholds[node.Name])
+			klog.InfoS("Node is underutilized", "node", klog.KObj(nodeUsage.Node), "usage", nodeUsage.CurrentUsage)
 			lowNodes = append(lowNodes, nodeInfo)
 		} else if highThresholdFilter(nodeUsage.Node, nodeUsage, nodeThresholds[node.Name]) {
-			klog.InfoS("Node is overutilized", "node", klog.KObj(nodeUsage.Node), "usage", nodeUsage.CurrentUsage, "thresholds", nodeThresholds[node.Name])
+			klog.InfoS("Node is overutilized", "node", klog.KObj(nodeUsage.Node), "usage", nodeUsage.CurrentUsage)
 			highNodes = append(highNodes, nodeInfo)
 		} else {
 			klog.InfoS("Node is appropriately utilized", "node", klog.KObj(nodeUsage.Node), "usage", nodeUsage.CurrentUsage)
@@ -59,7 +59,6 @@ type checkNodeFunc func(nodeThresholds v1.ResourceList, thresholds map[v1.Resour
 func IsNodeAboveTargetUtilization(nodeThresholds v1.ResourceList, thresholds map[v1.ResourceName]*resource.Quantity) bool {
 	for name, nodeValue := range nodeThresholds {
 		if name == v1.ResourceCPU || name == v1.ResourceMemory || name == v1.ResourcePods {
-			klog.V(1).InfoS("Node threshold (High check)", "name", name, "threshold", thresholds[name].MilliValue(), "usage", nodeValue.MilliValue())
 			if value, ok := thresholds[name]; !ok {
 				continue
 			} else if nodeValue.MilliValue() > value.MilliValue() {
@@ -74,8 +73,6 @@ func IsNodeAboveTargetUtilization(nodeThresholds v1.ResourceList, thresholds map
 func IsNodeWithLowUtilization(nodeThresholds v1.ResourceList, thresholds map[v1.ResourceName]*resource.Quantity) bool {
 	for name, nodeValue := range nodeThresholds {
 		if name == v1.ResourceCPU || name == v1.ResourceMemory || name == v1.ResourcePods {
-			// log the current threshold and usage
-			klog.V(1).InfoS("Node threshold (Low check)", "name", name, "threshold", thresholds[name].MilliValue(), "usage", nodeValue.MilliValue())
 			if value, ok := thresholds[name]; !ok {
 				continue
 			} else if nodeValue.MilliValue() > value.MilliValue() {

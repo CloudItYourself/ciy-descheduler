@@ -228,10 +228,8 @@ func resourceThreshold(nodeCapacity v1.ResourceList, resourceName v1.ResourceNam
 	resourceCapacityQuantity := nodeCapacity.Name(resourceName, defaultFormat)
 
 	if resourceName == v1.ResourceCPU {
-		klog.V(1).InfoS("CPU threshold", "threshold", threshold, "actual", resourceCapacityFraction(resourceCapacityQuantity.MilliValue()))
 		return resource.NewMilliQuantity(resourceCapacityFraction(resourceCapacityQuantity.MilliValue()), defaultFormat)
 	}
-	klog.V(1).InfoS("Memory threshold", "threshold", threshold, "actual", resourceCapacityFraction(resourceCapacityQuantity.Value()))
 	return resource.NewQuantity(resourceCapacityFraction(resourceCapacityQuantity.Value()), defaultFormat)
 }
 
