@@ -42,16 +42,17 @@ type (
 )
 
 type PodEvictor struct {
-	client                     clientset.Interface
-	nodes                      []*v1.Node
-	policyGroupVersion         string
-	dryRun                     bool
-	maxPodsToEvictPerNode      *uint
-	maxPodsToEvictPerNamespace *uint
-	nodepodCount               nodePodEvictedCount
-	namespacePodCount          namespacePodEvictCount
-	metricsEnabled             bool
-	eventRecorder              events.EventRecorder
+	client                        clientset.Interface
+	nodes                         []*v1.Node
+	policyGroupVersion            string
+	dryRun                        bool
+	maxPodsToEvictPerNode         *uint
+	maxPodsToEvictPerNamespace    *uint
+	replicaCountLeftPerReplicaSet map[string]int32
+	nodepodCount                  nodePodEvictedCount
+	namespacePodCount             namespacePodEvictCount
+	metricsEnabled                bool
+	eventRecorder                 events.EventRecorder
 }
 
 func NewPodEvictor(
@@ -66,22 +67,24 @@ func NewPodEvictor(
 ) *PodEvictor {
 	nodePodCount := make(nodePodEvictedCount)
 	namespacePodCount := make(namespacePodEvictCount)
+	replicaCountLeftPerReplicaSet := make(map[string]int32)
 	for _, node := range nodes {
 		// Initialize podsEvicted till now with 0.
 		nodePodCount[node.Name] = 0
 	}
 
 	return &PodEvictor{
-		client:                     client,
-		nodes:                      nodes,
-		policyGroupVersion:         policyGroupVersion,
-		dryRun:                     dryRun,
-		maxPodsToEvictPerNode:      maxPodsToEvictPerNode,
-		maxPodsToEvictPerNamespace: maxPodsToEvictPerNamespace,
-		nodepodCount:               nodePodCount,
-		namespacePodCount:          namespacePodCount,
-		metricsEnabled:             metricsEnabled,
-		eventRecorder:              eventRecorder,
+		client:                        client,
+		nodes:                         nodes,
+		policyGroupVersion:            policyGroupVersion,
+		dryRun:                        dryRun,
+		maxPodsToEvictPerNode:         maxPodsToEvictPerNode,
+		maxPodsToEvictPerNamespace:    maxPodsToEvictPerNamespace,
+		replicaCountLeftPerReplicaSet: replicaCountLeftPerReplicaSet,
+		nodepodCount:                  nodePodCount,
+		namespacePodCount:             namespacePodCount,
+		metricsEnabled:                metricsEnabled,
+		eventRecorder:                 eventRecorder,
 	}
 }
 
@@ -144,8 +147,50 @@ func (pe *PodEvictor) EvictPod(ctx context.Context, pod *v1.Pod, opts EvictOptio
 		klog.ErrorS(fmt.Errorf("maximum number of evicted pods per namespace reached"), "Error evicting pod", "limit", *pe.maxPodsToEvictPerNamespace, "namespace", pod.Namespace)
 		return false
 	}
+	// check if pod owner is a replica set or deployment, if it make sure that at least one replica is left per cycle
+	updateReplicaCounter := false
+	controllerUniqueName := pod.Namespace + "/" + pod.OwnerReferences[0].Name
 
+	if pe.replicaCountLeftPerReplicaSet != nil {
+		replicaContoller := pod.OwnerReferences[0]
+		if replicaContoller.Kind == "ReplicaSet" || replicaContoller.Kind == "Deployment" {
+			if _, ok := pe.replicaCountLeftPerReplicaSet[controllerUniqueName]; ok {
+				if pe.replicaCountLeftPerReplicaSet[controllerUniqueName] == 1 {
+					span.AddEvent("Eviction Failed", trace.WithAttributes(attribute.String("node", pod.Spec.NodeName), attribute.String("err", "Cannot evict pods from replica sets with only 1 replica left")))
+					return false
+				} else {
+					updateReplicaCounter = true
+				}
+			} else {
+				if replicaContoller.Kind == "ReplicaSet" {
+					replicaSet, err := pe.client.AppsV1().ReplicaSets(pod.Namespace).Get(context.Background(), replicaContoller.Name, metav1.GetOptions{})
+					if err != nil {
+						span.AddEvent("Eviction Failed", trace.WithAttributes(attribute.String("node", pod.Spec.NodeName), attribute.String("err", "Failed to get replica controller details")))
+						return false
+					}
+					// Check the ReplicaSet size
+					pe.replicaCountLeftPerReplicaSet[controllerUniqueName] = *replicaSet.Spec.Replicas
+					updateReplicaCounter = true
+				} else {
+					deployment, err := pe.client.AppsV1().Deployments(pod.Namespace).Get(context.Background(), replicaContoller.Name, metav1.GetOptions{})
+					if err != nil {
+						span.AddEvent("Eviction Failed", trace.WithAttributes(attribute.String("node", pod.Spec.NodeName), attribute.String("err", "Failed to get deployment controller details")))
+						return false
+					}
+					// Check the Deployment size
+					pe.replicaCountLeftPerReplicaSet[controllerUniqueName] = *deployment.Spec.Replicas
+					updateReplicaCounter = true
+				}
+
+				if pe.replicaCountLeftPerReplicaSet[controllerUniqueName] == 1 {
+					span.AddEvent("Eviction Failed", trace.WithAttributes(attribute.String("node", pod.Spec.NodeName), attribute.String("err", "Cannot evict pods from replica sets with only 1 replica left")))
+					return false
+				}
+			}
+		}
+	}
 	err := evictPod(ctx, pe.client, pod, pe.policyGroupVersion)
+
 	if err != nil {
 		// err is used only for logging purposes
 		span.AddEvent("Eviction Failed", trace.WithAttributes(attribute.String("node", pod.Spec.NodeName), attribute.String("err", err.Error())))
@@ -155,7 +200,9 @@ func (pe *PodEvictor) EvictPod(ctx context.Context, pod *v1.Pod, opts EvictOptio
 		}
 		return false
 	}
-
+	if updateReplicaCounter {
+		pe.replicaCountLeftPerReplicaSet[controllerUniqueName]--
+	}
 	if pod.Spec.NodeName != "" {
 		pe.nodepodCount[pod.Spec.NodeName]++
 	}
