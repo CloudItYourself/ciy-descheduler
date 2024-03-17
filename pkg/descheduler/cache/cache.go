@@ -173,9 +173,9 @@ func (c *Cache) syncMetricsWorker() {
 	for i := range metricsList.Items {
 		item := metricsList.Items[i]
 		if _, ok := c.nodes[item.Name]; ok {
+			klog.V(1).Infof("Metrics for node: %s, node:%v", item.Name, item.)
 			c.nodes[item.Name].updateTime = item.Timestamp.Time
 			c.nodes[item.Name].realUsed = append(c.nodes[item.Name].realUsed, &item)
-			// 保留15分钟内的node利用率
 			cutTime := time.Now().Add(-time.Duration(MAX_REAL_METRICS_STORE) * time.Minute)
 			cutIndex := 0
 			for j, metricsItem := range c.nodes[item.Name].realUsed {
@@ -197,6 +197,7 @@ func (c *Cache) syncMetricsWorker() {
 	for i := range podMetricsList.Items {
 		podMetricsItem := podMetricsList.Items[i]
 		for name := range c.nodes {
+			klog.V(1).Infof("Metrics for pod:%v,node:%v", podMetricsItem.Name, name)
 			nodeStatus := c.nodes[name]
 			if _, ok := nodeStatus.pods[podMetricsItem.Name]; ok {
 				u := nodeStatus.pods[podMetricsItem.Name].realUsed
