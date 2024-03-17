@@ -151,44 +151,46 @@ func (pe *PodEvictor) EvictPod(ctx context.Context, pod *v1.Pod, opts EvictOptio
 	updateReplicaCounter := false
 	controllerUniqueName := pod.Namespace + "/" + pod.OwnerReferences[0].Name
 
-	if pe.replicaCountLeftPerReplicaSet != nil {
-		replicaContoller := pod.OwnerReferences[0]
-		if replicaContoller.Kind == "ReplicaSet" || replicaContoller.Kind == "Deployment" {
-			if _, ok := pe.replicaCountLeftPerReplicaSet[controllerUniqueName]; ok {
-				if pe.replicaCountLeftPerReplicaSet[controllerUniqueName] == 1 {
-					span.AddEvent("Eviction Failed", trace.WithAttributes(attribute.String("node", pod.Spec.NodeName), attribute.String("err", "Cannot evict pods from replica sets with only 1 replica left")))
-					return false
-				} else {
-					updateReplicaCounter = true
-				}
+	replicaContoller := pod.OwnerReferences[0]
+	if replicaContoller.Kind == "ReplicaSet" || replicaContoller.Kind == "Deployment" {
+		if value, ok := pe.replicaCountLeftPerReplicaSet[controllerUniqueName]; ok {
+			if value == 1 {
+				span.AddEvent("Eviction Failed", trace.WithAttributes(attribute.String("node", pod.Spec.NodeName), attribute.String("err", "Cannot evict pods from replica sets with only 1 replica left")))
+				return false
 			} else {
-				if replicaContoller.Kind == "ReplicaSet" {
-					replicaSet, err := pe.client.AppsV1().ReplicaSets(pod.Namespace).Get(context.Background(), replicaContoller.Name, metav1.GetOptions{})
-					if err != nil {
-						span.AddEvent("Eviction Failed", trace.WithAttributes(attribute.String("node", pod.Spec.NodeName), attribute.String("err", "Failed to get replica controller details")))
-						return false
-					}
-					// Check the ReplicaSet size
-					pe.replicaCountLeftPerReplicaSet[controllerUniqueName] = *replicaSet.Spec.Replicas
-					updateReplicaCounter = true
-				} else {
-					deployment, err := pe.client.AppsV1().Deployments(pod.Namespace).Get(context.Background(), replicaContoller.Name, metav1.GetOptions{})
-					if err != nil {
-						span.AddEvent("Eviction Failed", trace.WithAttributes(attribute.String("node", pod.Spec.NodeName), attribute.String("err", "Failed to get deployment controller details")))
-						return false
-					}
-					// Check the Deployment size
-					pe.replicaCountLeftPerReplicaSet[controllerUniqueName] = *deployment.Spec.Replicas
-					updateReplicaCounter = true
-				}
+				updateReplicaCounter = true
+			}
+		} else {
+			if replicaContoller.Kind == "ReplicaSet" {
+				replicaSet, err := pe.client.AppsV1().ReplicaSets(pod.Namespace).Get(context.Background(), replicaContoller.Name, metav1.GetOptions{})
+				if err != nil {
+					klog.ErrorS(err, "Error evicting pod", "pod", klog.KObj(pod), "reason", "failed to get replica set details")
 
-				if pe.replicaCountLeftPerReplicaSet[controllerUniqueName] == 1 {
-					span.AddEvent("Eviction Failed", trace.WithAttributes(attribute.String("node", pod.Spec.NodeName), attribute.String("err", "Cannot evict pods from replica sets with only 1 replica left")))
+					span.AddEvent("Eviction Failed", trace.WithAttributes(attribute.String("node", pod.Spec.NodeName), attribute.String("err", "Failed to get replica controller details")))
 					return false
 				}
+				// Check the ReplicaSet size
+				pe.replicaCountLeftPerReplicaSet[controllerUniqueName] = *replicaSet.Spec.Replicas
+				updateReplicaCounter = true
+			} else {
+				deployment, err := pe.client.AppsV1().Deployments(pod.Namespace).Get(context.Background(), replicaContoller.Name, metav1.GetOptions{})
+				if err != nil {
+					klog.ErrorS(err, "Error evicting pod", "pod", klog.KObj(pod), "reason", "failed to get deployment details")
+					span.AddEvent("Eviction Failed", trace.WithAttributes(attribute.String("node", pod.Spec.NodeName), attribute.String("err", "Failed to get deployment controller details")))
+					return false
+				}
+				// Check the Deployment size
+				pe.replicaCountLeftPerReplicaSet[controllerUniqueName] = *deployment.Spec.Replicas
+				updateReplicaCounter = true
+			}
+			if pe.replicaCountLeftPerReplicaSet[controllerUniqueName] == 1 {
+				klog.V(1).InfoS("Error evicting pod", "pod", klog.KObj(pod), "reason", "Cannot evict pods from replica sets with only 1 replica left")
+				span.AddEvent("Eviction Failed", trace.WithAttributes(attribute.String("node", pod.Spec.NodeName), attribute.String("err", "Cannot evict pods from replica sets with only 1 replica left")))
+				return false
 			}
 		}
 	}
+
 	err := evictPod(ctx, pe.client, pod, pe.policyGroupVersion)
 
 	if err != nil {
