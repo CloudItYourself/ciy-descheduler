@@ -183,11 +183,6 @@ func (pe *PodEvictor) EvictPod(ctx context.Context, pod *v1.Pod, opts EvictOptio
 				pe.replicaCountLeftPerReplicaSet[controllerUniqueName] = *deployment.Spec.Replicas
 				updateReplicaCounter = true
 			}
-			if pe.replicaCountLeftPerReplicaSet[controllerUniqueName] == 1 {
-				klog.V(1).InfoS("Error evicting pod", "pod", klog.KObj(pod), "reason", "Cannot evict pods from replica sets with only 1 replica left")
-				span.AddEvent("Eviction Failed", trace.WithAttributes(attribute.String("node", pod.Spec.NodeName), attribute.String("err", "Cannot evict pods from replica sets with only 1 replica left")))
-				return false
-			}
 		}
 	}
 

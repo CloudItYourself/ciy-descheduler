@@ -262,18 +262,24 @@ func evictPodsWithReal(
 					if podCPUUsage.MilliValue() <= availableCPU.MilliValue() && podMemoryUsage.MilliValue() <= availableMemory.MilliValue() {
 						if podEvictor.Evict(ctx, pod, evictions.EvictOptions{}) {
 
-							(*totalAvailableUsage)[evictedNode][v1.ResourceCPU].Sub(podCPUUsage)
-							(*totalAvailableUsage)[evictedNode][v1.ResourceMemory].Sub(podMemoryUsage)
-
 							nodeDetails[v1.ResourceCPU].Add(podCPUUsage)
 							nodeDetails[v1.ResourceMemory].Add(podMemoryUsage)
+
 							currentNodeUsage := nodeInfo.CurrentUsage
-							cpuUsage := currentNodeUsage[v1.ResourceCPU]
-							memUsage := currentNodeUsage[v1.ResourceMemory]
+							cpuUsage := currentNodeUsage[v1.ResourceCPU].DeepCopy()
+							memUsage := currentNodeUsage[v1.ResourceMemory].DeepCopy()
+
+							cpuUsage.Sub(podCPUUsage)
+							memUsage.Sub(podCPUUsage)
+
+							nodeInfo.CurrentUsage = v1.ResourceList{
+								v1.ResourceCPU:    cpuUsage.DeepCopy(),
+								v1.ResourceMemory: memUsage.DeepCopy(),
+							}
 
 							keysAndValues := []interface{}{
 								"node", nodeInfo.Node.Name,
-								"evicted node", evictedNode,
+								"evicted using", evictedNode,
 								"CPU", cpuUsage.MilliValue(),
 								"Mem", memUsage.Value(),
 							}
