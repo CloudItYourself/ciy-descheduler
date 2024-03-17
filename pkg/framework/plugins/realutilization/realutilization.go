@@ -40,10 +40,10 @@ func classifyNodesWithReal(
 			threshold:    nodeThresholds[node.Name],
 		}
 		if lowThresholdFilter(nodeUsage.Node, nodeUsage, nodeThresholds[node.Name]) {
-			klog.InfoS("Node is underutilized", "node", klog.KObj(nodeUsage.Node), "usage", nodeUsage.CurrentUsage)
+			klog.InfoS("Node is underutilized", "node", klog.KObj(nodeUsage.Node), "usage", nodeUsage.CurrentUsage, "thresholds", nodeThresholds[node.Name])
 			lowNodes = append(lowNodes, nodeInfo)
 		} else if highThresholdFilter(nodeUsage.Node, nodeUsage, nodeThresholds[node.Name]) {
-			klog.InfoS("Node is overutilized", "node", klog.KObj(nodeUsage.Node), "usage", nodeUsage.CurrentUsage)
+			klog.InfoS("Node is overutilized", "node", klog.KObj(nodeUsage.Node), "usage", nodeUsage.CurrentUsage, "thresholds", nodeThresholds[node.Name])
 			highNodes = append(highNodes, nodeInfo)
 		} else {
 			klog.InfoS("Node is appropriately utilized", "node", klog.KObj(nodeUsage.Node), "usage", nodeUsage.CurrentUsage)
