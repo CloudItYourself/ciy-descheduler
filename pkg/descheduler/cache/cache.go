@@ -173,7 +173,7 @@ func (c *Cache) syncMetricsWorker() {
 	for i := range metricsList.Items {
 		item := metricsList.Items[i]
 		if _, ok := c.nodes[item.Name]; ok {
-			klog.V(1).Infof("Metrics for node: %s, node:%v", item.Name, item.)
+			klog.V(1).Infof("Metrics for node: %s, cpu real used: %s, memory real used:%s", item.Name, item.Usage.Cpu().String(), item.Usage.Memory().String())
 			c.nodes[item.Name].updateTime = item.Timestamp.Time
 			c.nodes[item.Name].realUsed = append(c.nodes[item.Name].realUsed, &item)
 			cutTime := time.Now().Add(-time.Duration(MAX_REAL_METRICS_STORE) * time.Minute)
