@@ -59,9 +59,10 @@ type checkNodeFunc func(nodeThresholds v1.ResourceList, thresholds map[v1.Resour
 func IsNodeAboveTargetUtilization(nodeThresholds v1.ResourceList, thresholds map[v1.ResourceName]*resource.Quantity) bool {
 	for name, nodeValue := range nodeThresholds {
 		if name == v1.ResourceCPU || name == v1.ResourceMemory || name == v1.ResourcePods {
+			klog.V(1).InfoS("Node threshold (High check)", "name", name, "threshold", thresholds[name].MilliValue(), "usage", nodeValue.MilliValue())
 			if value, ok := thresholds[name]; !ok {
 				continue
-			} else if nodeValue.Value() > value.Value() {
+			} else if nodeValue.MilliValue() > value.MilliValue() {
 				return true
 			}
 		}
@@ -73,9 +74,11 @@ func IsNodeAboveTargetUtilization(nodeThresholds v1.ResourceList, thresholds map
 func IsNodeWithLowUtilization(nodeThresholds v1.ResourceList, thresholds map[v1.ResourceName]*resource.Quantity) bool {
 	for name, nodeValue := range nodeThresholds {
 		if name == v1.ResourceCPU || name == v1.ResourceMemory || name == v1.ResourcePods {
+			// log the current threshold and usage
+			klog.V(1).InfoS("Node threshold (Low check)", "name", name, "threshold", thresholds[name].MilliValue(), "usage", nodeValue.MilliValue())
 			if value, ok := thresholds[name]; !ok {
 				continue
-			} else if nodeValue.Value() > value.Value() {
+			} else if nodeValue.MilliValue() > value.MilliValue() {
 				return false
 			}
 		}
@@ -85,7 +88,6 @@ func IsNodeWithLowUtilization(nodeThresholds v1.ResourceList, thresholds map[v1.
 
 func CheckNodeByWindowLatestCt(nodeThresholdsList []v1.ResourceList, thresholds map[v1.ResourceName]*resource.Quantity, f checkNodeFunc, latestCt int) bool {
 	if len(nodeThresholdsList) == 0 || len(nodeThresholdsList) < latestCt {
-		// metrics is empty
 		return false
 	}
 	for _, nodeThresholds := range nodeThresholdsList[len(nodeThresholdsList)-latestCt:] {
